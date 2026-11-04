@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0f0d">
+<title>Prospecção de clientes por nicho</title>
+<link rel="stylesheet" href="styles.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="topo">
+    <h1>Prospecção de clientes</h1>
+    <p class="subtitulo">Ache negócios por nicho e raio, veja se têm site e chame no WhatsApp.</p>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="card busca" aria-label="Buscar negócios">
+    <label class="campo">
+      <span>Nicho</span>
+      <input id="nicho" type="text" placeholder="Ex.: pizzaria" autocomplete="off" maxlength="100">
+    </label>
+
+    <div class="linha">
+      <label class="campo">
+        <span>Raio</span>
+        <select id="raio">
+          <option value="5">5 km</option>
+          <option value="10" selected>10 km</option>
+          <option value="25">25 km</option>
+          <option value="50">50 km</option>
+        </select>
+      </label>
+      <label class="campo">
+        <span>Cidade</span>
+        <input id="local" type="text" value="Piracicaba, SP" autocomplete="off" maxlength="120">
+      </label>
+    </div>
+
+    <div class="chips" aria-label="Nichos rápidos">
+      <button type="button" class="chip" data-nicho="pizzaria">Pizzaria</button>
+      <button type="button" class="chip" data-nicho="barbearia">Barbearia</button>
+      <button type="button" class="chip" data-nicho="salão de beleza">Salão de beleza</button>
+      <button type="button" class="chip" data-nicho="academia">Academia</button>
+      <button type="button" class="chip" data-nicho="restaurante">Restaurante</button>
+      <button type="button" class="chip" data-nicho="pet shop">Pet shop</button>
+    </div>
+
+    <button id="btnBuscar" type="button" class="btn-principal">Buscar negócios</button>
+    <p id="statusBusca" class="status" role="status"></p>
+  </section>
+
+  <section id="toolbar" class="toolbar" hidden>
+    <div class="filtros" role="group" aria-label="Filtrar resultados">
+      <button type="button" class="filtro ativo" data-filtro="todos">Todos</button>
+      <button type="button" class="filtro" data-filtro="sem-site">Sem site</button>
+      <button type="button" class="filtro" data-filtro="com-site">Com site</button>
+    </div>
+    <label class="ordenar">
+      <span>Ordenar</span>
+      <select id="ordem">
+        <option value="distancia">Distância</option>
+        <option value="avaliacao">Avaliação</option>
+      </select>
+    </label>
+  </section>
+  <p id="contador" class="contador" hidden></p>
+
+  <section id="resultados" class="resultados" aria-live="polite"></section>
+
+  <footer class="rodape">
+    <p>Dados: OpenStreetMap (grátis) ou Google Places, conforme a fonte ativa na busca. A qualidade do site é uma estimativa por sinais, não um veredito.</p>
+    <p>O WhatsApp abre com a mensagem pronta — você envia. Nada é disparado em massa automaticamente.</p>
+  </footer>
+
+</main>
+
+<!-- Painel de mensagem do WhatsApp -->
+<div id="painelFundo" class="painel-fundo" hidden>
+  <section class="painel" role="dialog" aria-modal="true" aria-labelledby="painelTitulo">
+    <div class="painel-topo">
+      <h2 id="painelTitulo">Mensagem no WhatsApp</h2>
+      <button id="painelFechar" type="button" class="btn-fechar" aria-label="Fechar">✕</button>
+    </div>
+    <p id="painelNegocio" class="painel-negocio"></p>
+    <div class="variantes" role="group" aria-label="Tipo de mensagem">
+      <button type="button" class="variante" data-variante="sem-site">Sem site</button>
+      <button type="button" class="variante" data-variante="com-site">Com site</button>
+    </div>
+    <label class="campo">
+      <span>Mensagem (edite como quiser)</span>
+      <textarea id="mensagem" rows="6" maxlength="1000"></textarea>
+    </label>
+    <p id="painelAviso" class="painel-aviso"></p>
+    <a id="btnAbrirWhats" class="btn-principal btn-whats" href="#" target="_blank" rel="noopener">Abrir WhatsApp</a>
+    <p class="painel-nota">A mensagem só é enviada quando você tocar em enviar no WhatsApp.</p>
+  </section>
+</div>
+
+</body>
+</html>
