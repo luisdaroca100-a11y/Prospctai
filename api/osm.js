@@ -128,21 +128,26 @@ function filterToQl(filter, around) {
   return 'nwr' + parts + '(' + around + ');';
 }
 
-// Monta a consulta Overpass QL: união dos filtros de etiquetas do nicho
-// + fallback por nome (regex, case-insensitive). `out center 60;`
-// devolve até 60 elementos com centro calculado para ways/relações.
-function buildOverpassQuery(nicho, lat, lon, radiusM) {
+// Duas consultas separadas, em ordem: primeiro SÓ as etiquetas do nicho
+// (consulta indexada, rápida); o fallback por nome (regex, que varre
+// todos os objetos com nome no raio — bem mais lento) só roda quando a
+// primeira volta vazia. Juntar as duas numa união só fazia o Overpass
+// público estourar o tempo limite e a busca voltar zerada.
+// `out center 60;` devolve até 60 elementos com centro calculado para
+// ways/relações.
+function buildTagQuery(nicho, lat, lon, radiusM) {
   const def = findNicheDef(nicho);
+  if (!def) return null;
   const around = 'around:' + Math.round(radiusM) + ',' + lat + ',' + lon;
-  const lines = [];
-  if (def) {
-    for (const f of def.filters) lines.push('  ' + filterToQl(f, around));
-  }
-  const safe = escapeOverpassRegex(String(nicho).trim());
-  if (safe) {
-    lines.push('  nwr["name"~"' + safe + '",i](' + around + ');');
-  }
+  const lines = def.filters.map((f) => '  ' + filterToQl(f, around));
   return '[out:json][timeout:25];\n(\n' + lines.join('\n') + '\n);\nout center 60;';
+}
+
+function buildNameQuery(nicho, lat, lon, radiusM) {
+  const safe = escapeOverpassRegex(String(nicho).trim());
+  if (!safe) return null;
+  const around = 'around:' + Math.round(radiusM) + ',' + lat + ',' + lon;
+  return '[out:json][timeout:25];\n(\n  nwr["name"~"' + safe + '",i](' + around + ');\n);\nout center 60;';
 }
 
 // ---------- HTTP com timeout (fetch injetável, para testes) ----------
@@ -265,13 +270,7 @@ function mapOsmElements(elements, center, fallbackCategory) {
 
 // ---------- Busca completa (geocode → Overpass) ----------
 
-async function searchOsm(params, fetchImpl) {
-  const center = await geocodeCity(params.local, fetchImpl);
-  if (!center) {
-    throw new Error('Não encontrei a cidade "' + params.local + '" no mapa grátis. Confira o nome da cidade e tente de novo.');
-  }
-  const def = tagsForNicho(params.nicho);
-  const query = buildOverpassQuery(params.nicho, center.lat, center.lng, params.raioKm * 1000);
+async function runOverpassQuery(query, fetchImpl) {
   let res;
   try {
     res = await fetchWithTimeoutImpl(OVERPASS_URL, {
@@ -289,7 +288,23 @@ async function searchOsm(params, fetchImpl) {
     throw new Error('O mapa grátis não respondeu agora (erro ' + res.status + '). Tente de novo em instantes ou configure a chave do Google.');
   }
   const data = await res.json();
-  const elements = data && Array.isArray(data.elements) ? data.elements : [];
+  return data && Array.isArray(data.elements) ? data.elements : [];
+}
+
+async function searchOsm(params, fetchImpl) {
+  const center = await geocodeCity(params.local, fetchImpl);
+  if (!center) {
+    throw new Error('Não encontrei a cidade "' + params.local + '" no mapa grátis. Confira o nome da cidade e tente de novo.');
+  }
+  const def = tagsForNicho(params.nicho);
+  // Etiquetas primeiro; nome só se voltar vazio (ver buildTagQuery).
+  let elements = [];
+  const tagQuery = buildTagQuery(params.nicho, center.lat, center.lng, params.raioKm * 1000);
+  if (tagQuery) elements = await runOverpassQuery(tagQuery, fetchImpl);
+  if (!elements.length) {
+    const nameQuery = buildNameQuery(params.nicho, center.lat, center.lng, params.raioKm * 1000);
+    if (nameQuery) elements = await runOverpassQuery(nameQuery, fetchImpl);
+  }
   const results = filterByRadius(
     mapOsmElements(elements, center, def.label || params.nicho),
     params.raioKm
@@ -303,7 +318,8 @@ module.exports = {
   findNicheDef,
   tagsForNicho,
   escapeOverpassRegex,
-  buildOverpassQuery,
+  buildTagQuery,
+  buildNameQuery,
   geocodeCity,
   composeAddress,
   categoryFromTags,

@@ -3,6 +3,8 @@
 // Testes da prospecção — sem rede real (fetch é mockado onde precisa).
 // Rodar: node test/test-prospeccao.js
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const lib = require('../api/_lib');
 const app = require('../app');
 
@@ -475,20 +477,22 @@ async function testOsm() {
   eq(osm.escapeOverpassRegex('a"b\nc'), 'abc', 'aspas e quebra removidas');
   eq(osm.escapeOverpassRegex('pão [doce]'), 'pão \\[doce\\]', 'colchetes escapados');
 
-  // ---------- buildOverpassQuery ----------
+  // ---------- buildTagQuery / buildNameQuery ----------
   {
-    const q = osm.buildOverpassQuery('pizzaria', -22.725, -47.65, 10000);
+    const q = osm.buildTagQuery('pizzaria', -22.725, -47.65, 10000);
     ok(q.indexOf('[out:json][timeout:25];') !== -1, 'timeout 25');
     ok(q.indexOf('out center 60;') !== -1, 'out center 60');
     ok(q.indexOf('around:10000,-22.725,-47.65') !== -1, 'around com raio e centro');
     ok(q.indexOf('["amenity"="restaurant"]["cuisine"="pizza"]') !== -1, 'filtro pizza restaurante');
-    ok(q.indexOf('["name"~"pizzaria",i]') !== -1, 'fallback por nome');
-    const q2 = osm.buildOverpassQuery('encanador', -22.725, -47.65, 5000);
-    ok(q2.indexOf('["amenity"') === -1, 'nicho desconhecido: sem filtro de etiqueta');
-    ok(q2.indexOf('["name"~"encanador",i]') !== -1, 'nicho desconhecido: só nome');
-    const q3 = osm.buildOverpassQuery('pizza (calabresa)', -22.725, -47.65, 5000);
-    ok(q3.indexOf('pizza \\(calabresa\\)') !== -1, 'regex do usuário escapada na query');
-    ok(q3.indexOf('pizza (calabresa)') === -1, 'sem parêntese cru na query');
+    ok(q.indexOf('["name"~') === -1, 'consulta de etiquetas sem regex de nome');
+    eq(osm.buildTagQuery('encanador', -22.725, -47.65, 5000), null, 'nicho desconhecido: sem consulta de etiquetas');
+    const nq = osm.buildNameQuery('encanador', -22.725, -47.65, 5000);
+    ok(nq.indexOf('["name"~"encanador",i]') !== -1, 'nicho desconhecido: só nome');
+    ok(nq.indexOf('["amenity"') === -1, 'consulta de nome sem filtro de etiqueta');
+    const nq2 = osm.buildNameQuery('pizza (calabresa)', -22.725, -47.65, 5000);
+    ok(nq2.indexOf('pizza \\(calabresa\\)') !== -1, 'regex do usuário escapada na query');
+    ok(nq2.indexOf('pizza (calabresa)') === -1, 'sem parêntese cru na query');
+    eq(osm.buildNameQuery('', -22.725, -47.65, 5000), null, 'nicho vazio: sem consulta de nome');
   }
 
   // ---------- mapOsmElements ----------
@@ -575,6 +579,39 @@ async function testOsm() {
     } catch (e) { erro = e; }
     ok(erro && erro.message.indexOf('mapa grátis') !== -1, 'geocode fora = erro em linguagem simples');
   }
+  // ---------- searchOsm: fallback por nome só quando a consulta de etiquetas volta vazia ----------
+  {
+    const node = { type: 'node', id: 42, lat: -22.72, lon: -47.64, tags: { name: 'Pizzaria Fallback', amenity: 'restaurant', cuisine: 'pizza' } };
+    let overpassCalls = 0;
+    const fakeFetch = async (url, opts) => {
+      if (String(url).includes('nominatim.openstreetmap.org')) {
+        return { ok: true, status: 200, json: async () => [{ lat: '-22.725', lon: '-47.65' }] };
+      }
+      overpassCalls++;
+      // 1ª chamada (etiquetas) volta vazia; 2ª (nome) volta o negócio.
+      const elements = overpassCalls === 1 ? [] : [node];
+      return { ok: true, status: 200, json: async () => ({ elements }) };
+    };
+    const r = await osm.searchOsm({ nicho: 'pizzaria', raioKm: 10, local: 'Cidade Fallback, SP' }, fakeFetch);
+    eq(overpassCalls, 2, 'etiquetas vazias → fallback por nome roda');
+    eq(r.results.length, 1, 'fallback achou o negócio');
+    eq(r.results[0].name, 'Pizzaria Fallback', 'nome do fallback');
+  }
+  {
+    // Etiquetas com resultado → a consulta por nome nem roda.
+    const node = { type: 'node', id: 43, lat: -22.72, lon: -47.64, tags: { name: 'Pizzaria Direta', amenity: 'restaurant', cuisine: 'pizza' } };
+    let overpassCalls = 0;
+    const fakeFetch = async (url) => {
+      if (String(url).includes('nominatim.openstreetmap.org')) {
+        return { ok: true, status: 200, json: async () => [{ lat: '-22.725', lon: '-47.65' }] };
+      }
+      overpassCalls++;
+      return { ok: true, status: 200, json: async () => ({ elements: [node] }) };
+    };
+    const r = await osm.searchOsm({ nicho: 'pizzaria', raioKm: 10, local: 'Cidade Direta, SP' }, fakeFetch);
+    eq(overpassCalls, 1, 'etiquetas com resultado → sem consulta por nome');
+    eq(r.results.length, 1, 'resultado direto');
+  }
 }
 
 async function testConfigHandler() {
@@ -604,6 +641,13 @@ async function testConfigHandler() {
     await configHandler({ method: 'POST', url: '/api/config', on() {} }, res);
     eq(res.statusCode, 405, 'config POST = 405');
   }
+}
+
+// ---------- styles.css: [hidden] tem que vencer display:flex ----------
+// (sem esta regra o painel do WhatsApp aparecia sozinho e o X não fechava)
+{
+  const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  ok(/\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important/.test(css), 'styles.css tem regra [hidden]{display:none!important}');
 }
 
 (async () => {

@@ -1,4 +1,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* O atributo hidden tem que vencer qualquer display do CSS (ex.:
+   .painel-fundo e .toolbar usam display:flex — sem esta regra o painel
+   do WhatsApp aparecia sozinho ao carregar e o X não o fechava). */
+[hidden] { display: none !important; }
 :root {
   --bg: #0a0f0d;
   --bg2: #101613;
