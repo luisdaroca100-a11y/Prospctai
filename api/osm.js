@@ -8,7 +8,21 @@
 const { distanceKm, normalizePhone, filterByRadius } = require('./_lib');
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+// Espelhos do Overpass, em ordem: o principal (FOSSGIS) e o reserva
+// global (Private.coffee, ex-kumi.systems). O principal ficou sem
+// responder por dias (timeout/502 em 04 e 05/11/2026, em 3 redes
+// independentes), então cada consulta tenta o próximo espelho quando
+// o anterior estoura o tempo ou devolve erro — sem chave, sem mudar
+// a fonte (continua OpenStreetMap). NÃO usar o VK Maps (suspenso
+// desde 16/03/2026) nem o suíço (só dados da Suíça).
+const OVERPASS_URLS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter'
+];
+const OVERPASS_URL = OVERPASS_URLS[0];
+// 15 s por espelho: com 2 espelhos o total fica ~30 s, igual ao
+// limite anterior de uma única tentativa.
+const OVERPASS_MIRROR_TIMEOUT_MS = 15000;
 // A política de uso do Nominatim/Overpass pede um User-Agent que
 // identifique a aplicação. Sem ele, as chamadas podem ser bloqueadas.
 const USER_AGENT = 'prospeccao-clientes/1.0';
@@ -270,25 +284,39 @@ function mapOsmElements(elements, center, fallbackCategory) {
 
 // ---------- Busca completa (geocode → Overpass) ----------
 
+// Tenta os espelhos do Overpass em ordem, com 15 s por espelho.
+// Passa para o próximo só em timeout ou resposta não-OK; devolve o
+// primeiro resultado parseado com sucesso. O erro em linguagem
+// simples só aparece quando TODOS os espelhos falham.
 async function runOverpassQuery(query, fetchImpl) {
-  let res;
-  try {
-    res = await fetchWithTimeoutImpl(OVERPASS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': USER_AGENT
-      },
-      body: 'data=' + encodeURIComponent(query)
-    }, 30000, fetchImpl);
-  } catch (e) {
-    throw new Error('O mapa grátis demorou demais para responder. Tente de novo em instantes ou configure a chave do Google.');
+  let lastError = null;
+  for (const url of OVERPASS_URLS) {
+    let res;
+    try {
+      res = await fetchWithTimeoutImpl(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': USER_AGENT
+        },
+        body: 'data=' + encodeURIComponent(query)
+      }, OVERPASS_MIRROR_TIMEOUT_MS, fetchImpl);
+    } catch (e) {
+      lastError = e;
+      continue;
+    }
+    if (!res.ok) {
+      lastError = new Error('HTTP ' + res.status);
+      continue;
+    }
+    const data = await res.json();
+    return data && Array.isArray(data.elements) ? data.elements : [];
   }
-  if (!res.ok) {
-    throw new Error('O mapa grátis não respondeu agora (erro ' + res.status + '). Tente de novo em instantes ou configure a chave do Google.');
+  if (lastError && lastError.message && lastError.message.indexOf('HTTP ') === 0) {
+    const status = lastError.message.slice(5);
+    throw new Error('O mapa grátis não respondeu agora (erro ' + status + '). Tente de novo em instantes ou configure a chave do Google.');
   }
-  const data = await res.json();
-  return data && Array.isArray(data.elements) ? data.elements : [];
+  throw new Error('O mapa grátis demorou demais para responder. Tente de novo em instantes ou configure a chave do Google.');
 }
 
 async function searchOsm(params, fetchImpl) {
@@ -326,5 +354,6 @@ module.exports = {
   mapOsmElements,
   searchOsm,
   NOMINATIM_URL,
-  OVERPASS_URL
+  OVERPASS_URL,
+  OVERPASS_URLS
 };

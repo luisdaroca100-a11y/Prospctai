@@ -612,6 +612,55 @@ async function testOsm() {
     eq(overpassCalls, 1, 'etiquetas com resultado → sem consulta por nome');
     eq(r.results.length, 1, 'resultado direto');
   }
+  // ---------- Overpass: fallback por espelho ----------
+  // 1º espelho estoura o tempo → 2º responde e a busca retorna.
+  {
+    const node = { type: 'node', id: 44, lat: -22.72, lon: -47.64, tags: { name: 'Pizzaria Espelho', amenity: 'restaurant', cuisine: 'pizza' } };
+    const hitUrls = [];
+    const fakeFetch = async (url) => {
+      if (String(url).includes('nominatim.openstreetmap.org')) {
+        return { ok: true, status: 200, json: async () => [{ lat: '-22.725', lon: '-47.65' }] };
+      }
+      hitUrls.push(String(url));
+      if (String(url).includes('overpass-api.de')) throw new Error('timeout do espelho principal');
+      return { ok: true, status: 200, json: async () => ({ elements: [node] }) };
+    };
+    const r = await osm.searchOsm({ nicho: 'pizzaria', raioKm: 10, local: 'Cidade Espelho, SP' }, fakeFetch);
+    eq(hitUrls.length, 2, '1º espelho falhou → 2º tentado');
+    ok(hitUrls[0].indexOf('overpass-api.de') !== -1, '1ª tentativa no espelho principal');
+    ok(hitUrls[1].indexOf('overpass.private.coffee') !== -1, '2ª tentativa no espelho reserva');
+    eq(r.results.length, 1, 'espelho reserva achou o negócio');
+    eq(r.results[0].name, 'Pizzaria Espelho', 'nome do espelho reserva');
+  }
+  // 1º espelho responde → só 1 chamada, sem tocar no reserva.
+  {
+    const node = { type: 'node', id: 45, lat: -22.72, lon: -47.64, tags: { name: 'Pizzaria Principal', amenity: 'restaurant', cuisine: 'pizza' } };
+    const hitUrls = [];
+    const fakeFetch = async (url) => {
+      if (String(url).includes('nominatim.openstreetmap.org')) {
+        return { ok: true, status: 200, json: async () => [{ lat: '-22.725', lon: '-47.65' }] };
+      }
+      hitUrls.push(String(url));
+      return { ok: true, status: 200, json: async () => ({ elements: [node] }) };
+    };
+    const r = await osm.searchOsm({ nicho: 'pizzaria', raioKm: 10, local: 'Cidade Principal, SP' }, fakeFetch);
+    eq(hitUrls.length, 1, '1º espelho respondeu → só 1 chamada');
+    eq(r.results.length, 1, 'resultado do espelho principal');
+  }
+  // Todos os espelhos falham → erro em linguagem simples, sem resultado.
+  {
+    const fakeFetch = async (url) => {
+      if (String(url).includes('nominatim.openstreetmap.org')) {
+        return { ok: true, status: 200, json: async () => [{ lat: '-22.725', lon: '-47.65' }] };
+      }
+      throw new Error('todos os espelhos fora');
+    };
+    let erro = null;
+    try {
+      await osm.searchOsm({ nicho: 'pizzaria', raioKm: 10, local: 'Cidade Sem Espelho, SP' }, fakeFetch);
+    } catch (e) { erro = e; }
+    ok(erro && erro.message.indexOf('mapa grátis') !== -1, 'todos os espelhos fora = erro do mapa grátis: ' + (erro && erro.message));
+  }
 }
 
 async function testConfigHandler() {
